@@ -10,14 +10,21 @@ def test_login_page(client):
 def test_login_success(client):
     # Clear sessions before test
     sessions.clear()
+    # We need to match the password in .env if it's loaded, 
+    # but for tests it's better to ensure we know what we are testing.
+    # The app.py loads load_dotenv() at the top.
+    import os
+    user = os.environ.get("APP_USERNAME", "admin")
+    pwd = os.environ.get("APP_PASSWORD", "admin")
+    
     response = client.post(
         "/login",
-        data={"username": "admin", "password": "admin"},
+        data={"username": user, "password": pwd},
         follow_redirects=False,
     )
     assert response.status_code == 303
     assert response.headers["location"] == "/dashboard"
-    assert sessions.get("admin") is True
+    assert sessions.get("is_authenticated") is True
 
 
 def test_login_failure(client):
@@ -37,7 +44,7 @@ def test_dashboard_unauthorized(client):
 
 
 def test_dashboard_authorized(client):
-    sessions["admin"] = True
+    sessions["is_authenticated"] = True
     response = client.get("/dashboard")
     assert response.status_code == 200
     assert "Dashboard" in response.text or "Дашборд" in response.text
