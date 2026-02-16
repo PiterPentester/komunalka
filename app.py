@@ -1,351 +1,326 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import os
-import base64
-import re
-import datetime
-import email
-from email import policy
-import time
-from bs4 import BeautifulSoup
-import pdfplumber
+import logging
+import json
+from fastapi import FastAPI, Request, Form, Depends, status
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session as DBSession
+from dotenv import load_dotenv
+from models import init_db, get_session, Receipt
+from gmail_helper import get_gmail_service, process_emails
+from nylas_helper import get_nylas_client, process_nylas_emails
+from utils import process_receipt_file
+from scheduler import start_scheduler
 
-# Google API
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+load_dotenv()
 
-# --- Constants & Config ---
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
-KEYWORDS = ["receipt", "invoice", "payment", "переказ", "рахунок", "order", "квитанція"]
-DB_FILE = "receipts_database.csv"
+# Setup
+init_db()
+app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-st.set_page_config(page_title="Komunalka", page_icon="🧾", layout="wide")
+# Simple login session (using a dict for demo, in production use middleware/JWT)
+sessions = {}
 
-# --- Styling ---
-st.markdown("""
-<style>
-    .metric-card {
-        background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
-        padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        color: white;
-        border: 1px solid rgba(255,255,255,0.1);
-    }
-    .stButton>button {
-        background: linear-gradient(90deg, #ff8a00, #e52e71);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-weight: bold;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Background scheduler startup
+BACKGROUND_CONFIG = {
+    "telegram_token": os.environ.get("TG_TOKEN"),
+    "telegram_chat_id": os.environ.get("TG_CHAT_ID"),
+}
+start_scheduler(BACKGROUND_CONFIG)
 
-# --- Helpers ---
-def load_data():
-    if os.path.exists(DB_FILE):
-        return pd.read_csv(DB_FILE)
-    return pd.DataFrame(columns=["Date", "Amount", "Merchant", "Category", "Address", "Source", "ID"])
+# i18n Dictionary
+I18N = {
+    "uk": {
+        "title": "Комуналка",
+        "dashboard": "Дашборд",
+        "settings": "Налаштування",
+        "scan_btn": "Сканувати пошту",
+        "total_spent": "Всього витрачено",
+        "receipts": "Квитанції",
+        "addresses": "Активні адреси",
+        "recent_receipts": "Останні квитанції",
+        "date": "Дата",
+        "provider": "Надавач",
+        "type": "Тип",
+        "amount": "Сума",
+        "address": "Адреса",
+        "save": "Зберегти",
+        "logout": "Вихід",
+        "notifications": "Сповіщення",
+        "tg_token": "Токен Telegram-бота",
+        "tg_chat_id": "ID чату Telegram",
+        "nylas_api_key": "Nylas API Key",
+        "nylas_grant_id": "Nylas Grant ID",
+        "login_title": "Вхід",
+        "user": "Користувач",
+        "pwd": "Пароль",
+        "electricity": "Електроенергія",
+        "gas": "Газ",
+        "water": "Вода",
+        "heating": "Опалення",
+        "rent": "Управління",
+        "internet": "Інтернет",
+        "other": "Інше",
+    },
+    "en": {
+        "title": "Komunalka",
+        "dashboard": "Dashboard",
+        "settings": "Settings",
+        "scan_btn": "Scan Emails",
+        "total_spent": "Total Spent",
+        "receipts": "Receipts",
+        "addresses": "Active Addresses",
+        "recent_receipts": "Recent Receipts",
+        "date": "Date",
+        "provider": "Provider",
+        "type": "Type",
+        "amount": "Amount",
+        "address": "Address",
+        "save": "Save",
+        "logout": "Logout",
+        "notifications": "Notifications",
+        "tg_token": "Telegram Bot Token",
+        "tg_chat_id": "Telegram Chat ID",
+        "nylas_api_key": "Nylas API Key",
+        "nylas_grant_id": "Nylas Grant ID",
+        "login_title": "Login",
+        "user": "User",
+        "pwd": "Password",
+        "electricity": "Electricity",
+        "gas": "Gas",
+        "water": "Water",
+        "heating": "Heating",
+        "rent": "Rent",
+        "internet": "Internet",
+        "other": "Other",
+    },
+}
 
-def save_data(df):
-    df.to_csv(DB_FILE, index=False)
 
-def get_gmail_service(creds_path, token_path="token.json"):
-    creds = None
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not os.path.exists(creds_path):
-                st.error(f"Credentials file not found at {creds_path}")
-                return None
-            flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(token_path, 'w') as token:
-            token.write(creds.to_json())
-    return build('gmail', 'v1', credentials=creds)
-
-def parse_text_content(text):
-    data = {}
-    
-    # 1. Dates (DD.MM.YYYY or YYYY-MM-DD)
-    date_match = re.search(r'(\d{2}[./-]\d{2}[./-]\d{4}|\d{4}[./-]\d{2}[./-]\d{2})', text)
-    if date_match:
-        try:
-            d_str = date_match.group(1).replace('.', '-').replace('/', '-')
-            if d_str[2] == '-': # DD-MM-YYYY
-                data['Date'] = datetime.datetime.strptime(d_str, "%d-%m-%Y").strftime("%Y-%m-%d")
-            else:
-                data['Date'] = d_str
-        except:
-            data['Date'] = datetime.date.today().strftime("%Y-%m-%d")
-    else:
-        data['Date'] = datetime.date.today().strftime("%Y-%m-%d")
-
-    # 2. Amount (Look for currency symbols or patterns)
-    # Ukraine/General regex: '150.00 грн', '120,50 uah', '$50.00'
-    amount_match = re.search(r'(?:Total|Сума|Amount|Suma).*?(\d+[.,]\d{2})', text, re.IGNORECASE)
-    if not amount_match:
-        # Fallback loose search
-        amount_match = re.search(r'(\d+[.,]\d{2})\s*(?:грн|UAH|USD|\$|EUR|€)', text, re.IGNORECASE)
-    
-    if amount_match:
-        val = amount_match.group(1).replace(',', '.')
-        try:
-            data['Amount'] = float(val)
-        except:
-            data['Amount'] = 0.0
-    else:
-        data['Amount'] = 0.0
-
-    # 3. Address
-    addr_match = re.search(r'(вул\.|str\.|St\.).{5,40}', text, re.IGNORECASE)
-    data['Address'] = addr_match.group(0) if addr_match else ""
-
-    return data
-
-def get_category(text, merchant, use_ai=False):
-    text_lower = (text + " " + merchant).lower()
-    
-    # Static Rules
-    if any(x in text_lower for x in ['privatbank', 'transfer', 'переказ']): return "Bank Transfer"
-    if any(x in text_lower for x in ['silpo', 'atb', 'novus', 'grocery', 'market']): return "Groceries"
-    if any(x in text_lower for x in ['vodafone', 'kyivstar', 'lifecell', 'internet', 'wifi']): return "Utilities"
-    if any(x in text_lower for x in ['coffee', 'cafe', 'restaurant', 'mcdonalds']): return "Dining"
-    if any(x in text_lower for x in ['uber', 'bolt', 'uklon', 'ticket']): return "Transport"
-
-    # AI Hook
-    if use_ai:
-        try:
-            from transformers import pipeline
-            classifier = pipeline("zero-shot-classification", model="distilbert-base-uncased-mnli")
-            labels = ["Groceries", "Utilities", "Bank Transfer", "Dining", "Transport", "Shopping", "Services"]
-            result = classifier(text[:512], labels) # Clip text for speed
-            return result['labels'][0]
-        except Exception as e:
-            st.warning(f"AI Error: {e}")
-            return "Other"
-            
-    return "Other"
-
-def process_message(service, msg_id, use_ai):
+def get_db():
+    db = get_session()
     try:
-        msg = service.users().messages().get(userId='me', id=msg_id).execute()
-        headers = {h['name']: h['value'] for h in msg['payload']['headers']}
-        subject = headers.get('Subject', 'No Subject')
-        sender = headers.get('From', 'Unknown')
-        
-        # Get content
-        full_text = f"{subject} {sender} "
-        
-        # Determine Body
-        if 'parts' in msg['payload']:
-            for part in msg['payload']['parts']:
-                if part['mimeType'] == 'text/plain':
-                    data = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
-                    full_text += data
-                elif part['mimeType'] == 'application/pdf':
-                    att_id = part['body'].get('attachmentId')
-                    if att_id:
-                        att = service.users().messages().attachments().get(userId='me', messageId=msg_id, id=att_id).execute()
-                        file_data = base64.urlsafe_b64decode(att['data'])
-                        with pdfplumber.open(io.BytesIO(file_data)) as pdf:
-                            for page in pdf.pages:
-                                full_text += page.extract_text() + " "
-        else:
-            # Simple body
-            if 'body' in msg['payload'] and 'data' in msg['payload']['body']:
-                full_text += base64.urlsafe_b64decode(msg['payload']['body']['data']).decode('utf-8')
+        yield db
+    finally:
+        db.close()
 
-        # Parse
-        parsed = parse_text_content(full_text)
-        
-        # Refine Data
-        merchant = sender.split('<')[0].strip().replace('"', '')
-        category = get_category(full_text, merchant, use_ai)
-        
-        return {
-            "Date": parsed['Date'],
-            "Amount": parsed['Amount'],
-            "Merchant": merchant,
-            "Category": category,
-            "Address": parsed['Address'],
-            "Source": f"Gmail: {subject[:30]}...",
-            "ID": msg_id
-        }
-    except Exception as e:
-        print(f"Error parsing {msg_id}: {e}")
-        return None
 
-# --- Main Setup ---
-st.title("🏠 Komunalka Dashboard")
+def get_lang(request: Request):
+    return request.cookies.get("lang", "uk")
 
-# User Inputs Sidebar
-with st.sidebar:
-    st.header("Settings")
-    creds_file = st.text_input("Credentials Path", "credentials.json")
-    use_ai = st.toggle("Enable AI Classification", value=False)
-    
-    st.subheader("Data Actions")
-    if st.button("Scan Inbox (Last 12mo)"):
-        status = st.status("Connecting to Gmail...", expanded=True)
-        try:
-            service = get_gmail_service(creds_file)
-            if service:
-                status.write("Searching emails...")
-                # Search query
-                query = f"({' OR '.join(KEYWORDS)}) newer_than:1y"
-                results = service.users().messages().list(userId='me', q=query, maxResults=30).execute()
-                messages = results.get('messages', [])
-                
-                status.write(f"Found {len(messages)} potential receipts. Parsing...")
-                
-                new_data = []
-                progress_bar = status.progress(0)
-                
-                for idx, m in enumerate(messages):
-                    data = process_message(service, m['id'], use_ai)
-                    if data and data['Amount'] > 0: # Filter empty/zero
-                        new_data.append(data)
-                    progress_bar.progress((idx + 1) / len(messages))
-                
-                if new_data:
-                    current_df = load_data()
-                    new_df = pd.DataFrame(new_data)
-                    # Merge avoiding dupes
-                    combined = pd.concat([current_df, new_df]).drop_duplicates(subset=['ID'])
-                    save_data(combined)
-                    status.update(label="Scan Complete!", state="complete", expanded=False)
-                    st.success(f"Added {len(new_df)} new records.")
-                    st.rerun()
+
+@app.get("/", response_class=HTMLResponse)
+async def login_page(request: Request):
+    lang = get_lang(request)
+    return templates.TemplateResponse(
+        "login.html", {"request": request, "T": I18N[lang], "lang": lang}
+    )
+
+
+@app.post("/login")
+async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    lang = get_lang(request)
+    env_user = os.environ.get("APP_USERNAME", "admin")
+    env_pass = os.environ.get("APP_PASSWORD", "admin")
+
+    if username == env_user and password == env_pass:
+        sessions["is_authenticated"] = True
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "T": I18N[lang],
+            "lang": lang,
+            "error": "Invalid credentials",
+        },
+    )
+
+
+@app.get("/lang/{lang_code}")
+async def set_language(lang_code: str):
+    response = RedirectResponse(url="/dashboard")
+    response.set_cookie(key="lang", value=lang_code)
+    return response
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request, db: DBSession = Depends(get_db)):
+    if not sessions.get("is_authenticated"):
+        return RedirectResponse(url="/")
+
+    lang = get_lang(request)
+    receipts = db.query(Receipt).order_by(Receipt.payment_datetime.desc()).all()
+
+    # Convert to JSON for Chart.js
+    data = []
+    for r in receipts:
+        data.append(
+            {
+                "id": r.id,
+                "provider": r.service_provider,
+                "type": r.service_type,
+                "amount": r.total_amount,
+                "date": r.payment_datetime.strftime("%Y-%m-%d")
+                if r.payment_datetime
+                else None,
+                "address": r.address,
+            }
+        )
+
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {
+            "request": request,
+            "receipts": data,
+            "json_data": json.dumps(data),
+            "T": I18N[lang],
+            "lang": lang,
+        },
+    )
+
+
+@app.post("/analyze_local")
+async def analyze_local(db: DBSession = Depends(get_db)):
+    if not sessions.get("is_authenticated"):
+        return JSONResponse(
+            {"status": "error", "message": "Unauthorized"}, status_code=401
+        )
+
+    try:
+        att_dir = "attachments"
+        if not os.path.exists(att_dir):
+            return JSONResponse(
+                {
+                    "status": "success",
+                    "added": 0,
+                    "message": "No attachments folder found",
+                }
+            )
+
+        files = [
+            os.path.join(att_dir, f)
+            for f in os.listdir(att_dir)
+            if os.path.isfile(os.path.join(att_dir, f))
+            and f.lower().endswith((".pdf", ".png", ".jpg", ".jpeg"))
+        ]
+
+        count = 0
+        for f in files:
+            logging.info(f"Local analysis of file: {f}")
+            data = process_receipt_file(f)
+            if data:
+                existing = (
+                    db.query(Receipt)
+                    .filter_by(receipt_number=data.get("receipt_number"))
+                    .first()
+                )
+                if not existing:
+                    r = Receipt(**data, raw_file_path=f, payment_status="successful")
+                    db.add(r)
+                    db.commit()
+                    count += 1
                 else:
-                    status.update(label="No valid receipts found.", state="complete")
-        except Exception as e:
-            status.update(label="Error occurred", state="error")
-            st.error(f"Details: {e}")
-            
-    if st.button("Load Sample Data"):
-        sample_data = [{
-            "Date": "2026-01-18",
-            "Amount": 151.61,
-            "Merchant": "PrivatBank",
-            "Category": "Bank Transfer",
-            "Address": "вул. Шевченка, 25, кв. 48",
-            "Source": "Sample Data",
-            "ID": "sample_1"
-        }, {
-             "Date": "2026-01-15",
-             "Amount": 450.00,
-             "Merchant": "Silpo",
-             "Category": "Groceries",
-             "Address": "Unknown",
-             "Source": "Sample Data",
-             "ID": "sample_2"
-        }]
-        current_df = load_data()
-        new_df = pd.DataFrame(sample_data)
-        combined = pd.concat([current_df, new_df]).drop_duplicates(subset=['ID'])
-        save_data(combined)
-        st.rerun()
+                    logging.info(
+                        f"Receipt {data.get('receipt_number')} already exists."
+                    )
+            else:
+                logging.warning(f"Could not extract data from {f}")
 
-# --- Dashboard View ---
-df = load_data()
+        return JSONResponse({"status": "success", "added": count})
+    except Exception as e:
+        logging.error(f"Local analysis error: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-# Ensure types
-df['Date'] = pd.to_datetime(df['Date'])
-df['Amount'] = pd.to_numeric(df['Amount'])
 
-# Filters
-col1, col2 = st.columns([1,3])
-with col1:
-    st.subheader("Filters")
-    # Date Filter
-    min_date = df['Date'].min().date() if not df.empty else datetime.date.today()
-    max_date = df['Date'].max().date() if not df.empty else datetime.date.today()
-    date_range = st.date_input("Date Range", [min_date, max_date])
-    
-    # Cat Filter
-    all_cats = ["All"] + list(df['Category'].unique()) if not df.empty else ["All"]
-    cat_filter = st.selectbox("Category", all_cats)
+@app.post("/scan")
+async def scan_emails(db: DBSession = Depends(get_db)):
+    if not sessions.get("is_authenticated"):
+        return JSONResponse({"status": "unauthorized"}, status_code=401)
 
-# Filter Logic
-if len(date_range) == 2:
-    start_d, end_d = date_range
-    mask = (df['Date'].dt.date >= start_d) & (df['Date'].dt.date <= end_d)
-    if cat_filter != "All":
-        mask = mask & (df['Category'] == cat_filter)
-    filtered_df = df.loc[mask]
-else:
-    filtered_df = df
+    files = []
+    try:
+        if os.environ.get("NYLAS_API_KEY") and os.environ.get("NYLAS_GRANT_ID"):
+            logging.info("Scanning using Nylas...")
+            client = get_nylas_client()
+            files = process_nylas_emails(client)
+        else:
+            logging.info("Scanning using Gmail direct API...")
+            service = get_gmail_service()
+            files = process_emails(service)
 
-# Metrics
-st.markdown("### 📊 Overview")
-m1, m2, m3 = st.columns(3)
-if not filtered_df.empty:
-    with m1:
-        st.markdown(f'<div class="metric-card"><h3>Total Spent</h3><h2>{filtered_df["Amount"].sum():.2f} UAH</h2></div>', unsafe_allow_html=True)
-    with m2:
-        st.markdown(f'<div class="metric-card"><h3>Avg Payment</h3><h2>{filtered_df["Amount"].mean():.2f} UAH</h2></div>', unsafe_allow_html=True)
-    with m3:
-        top_merch = filtered_df.groupby('Merchant')['Amount'].sum().idxmax()
-        st.markdown(f'<div class="metric-card"><h3>Top Merchant</h3><h2>{top_merch}</h2></div>', unsafe_allow_html=True)
-else:
-    st.info("No data available. Scan your inbox or check filters.")
+        count = 0
+        for f in files:
+            logging.info(f"Analyzing file: {f}")
+            data = process_receipt_file(f)
+            if data:
+                logging.info(
+                    f"Successfully extracted data from {f}: {data.get('receipt_number')}"
+                )
+                existing = (
+                    db.query(Receipt)
+                    .filter_by(receipt_number=data.get("receipt_number"))
+                    .first()
+                )
+                if not existing:
+                    r = Receipt(**data, raw_file_path=f, payment_status="successful")
+                    db.add(r)
+                    db.commit()
+                    count += 1
+                else:
+                    logging.info(
+                        f"Receipt {data.get('receipt_number')} already exists in DB."
+                    )
+            else:
+                logging.warning(f"Failed to extract data from {f}")
+        return JSONResponse({"status": "success", "added": count})
+    except Exception as e:
+        logging.error(f"Scan error: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-# Visualization
-st.divider()
-c1, c2 = st.columns([2, 1])
 
-with c1:
-    st.subheader("📅 Spending Calendar")
-    if not filtered_df.empty:
-        # Prepare heatmap data
-        daily_sum = filtered_df.groupby('Date')['Amount'].sum().reset_index()
-        fig_cal = go.Figure(data=go.Scatter(
-            x=daily_sum['Date'],
-            y=daily_sum['Amount'],
-            mode='markers',
-            marker=dict(
-                size=[min(max(x/10, 10), 50) for x in daily_sum['Amount']],
-                color=daily_sum['Amount'],
-                colorscale='Viridis',
-                showscale=True
-            ),
-            text=daily_sum['Amount'].apply(lambda x: f"{x} UAH"),
-            hovertemplate="<b>Date</b>: %{x}<br><b>Total</b>: %{y} UAH<extra></extra>"
-        ))
-        fig_cal.update_layout(title="Daily Spending Intensity", height=400, template="plotly_dark")
-        st.plotly_chart(fig_cal, use_container_width=True)
+@app.get("/settings", response_class=HTMLResponse)
+async def settings(request: Request):
+    if not sessions.get("is_authenticated"):
+        return RedirectResponse(url="/")
+    lang = get_lang(request)
+    return templates.TemplateResponse(
+        "settings.html",
+        {
+            "request": request,
+            "tg_token": os.environ.get("TG_TOKEN", ""),
+            "tg_chat_id": os.environ.get("TG_CHAT_ID", ""),
+            "nylas_api_key": os.environ.get("NYLAS_API_KEY", ""),
+            "nylas_grant_id": os.environ.get("NYLAS_GRANT_ID", ""),
+            "T": I18N[lang],
+            "lang": lang,
+        },
+    )
 
-with c2:
-    st.subheader("🛍️ Categories")
-    if not filtered_df.empty:
-        cat_fig = px.pie(filtered_df, values='Amount', names='Category', hole=0.4, template="plotly_dark")
-        cat_fig.update_layout(height=400)
-        st.plotly_chart(cat_fig, use_container_width=True)
 
-# Data Table
-st.subheader("📝 Recent Transactions")
-st.dataframe(
-    filtered_df.sort_values("Date", ascending=False),
-    use_container_width=True,
-    column_config={
-        "Amount": st.column_config.NumberColumn("Amount (UAH)", format="%.2f"),
-        "Date": st.column_config.DateColumn("Date", format="DD.MM.YYYY"),
-    }
-)
+@app.post("/settings")
+async def save_settings(
+    token: str = Form(None),
+    chat_id: str = Form(None),
+    nylas_api_key: str = Form(None),
+    nylas_grant_id: str = Form(None),
+):
+    if token:
+        os.environ["TG_TOKEN"] = token
+    if chat_id:
+        os.environ["TG_CHAT_ID"] = chat_id
+    if nylas_api_key:
+        os.environ["NYLAS_API_KEY"] = nylas_api_key
+    if nylas_grant_id:
+        os.environ["NYLAS_GRANT_ID"] = nylas_grant_id
+    # In a real app, save to a .env or config file
+    return RedirectResponse(url="/settings", status_code=status.HTTP_303_SEE_OTHER)
 
-# Downloads
-st.download_button(
-    label="Download CSV Report",
-    data=filtered_df.to_csv().encode('utf-8'),
-    file_name='komunalka_report.csv',
-    mime='text/csv',
-)
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

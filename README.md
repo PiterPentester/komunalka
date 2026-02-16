@@ -1,61 +1,96 @@
-# 🏠 Komunalka (Комуналка)
+# Komunalka Dashboard
 
-A local, private dashboard to track your expenses and receipts directly from your Gmail inbox. Designed for privacy and simplicity, running locally on your device (e.g., Orange Pi, Mac, PC).
+A full-stack Python web application to automate utility receipt tracking from Gmail/Nylas, designed with modern aesthetics and production-ready infrastructure.
 
 ## 🚀 Features
-- **Smart Scanning**: Fetches potential receipts (PDFs, recognized keywords) from Gmail.
-- **Local AI**: Optional on-device AI classification for expense categories.
-- **Privacy First**: Your data never leaves your device. Credentials stay local.
-- **Visual Analytics**: Beautiful calendar heatmaps and spending trends.
-- **Ukrainian Context**: Optimized for Ukrainian receipts ("грн", "рахунок", "PrivatBank").
+- **Smart Integration**: Automatically fetches receipt emails (PDF/Images) using Gmail API or Nylas.
+- **Advanced Data Extraction**: Uses `pdfplumber` and `pytesseract` (OCR) with highly optimized regex for Ukrainian utility providers (PrivatBank, Naftogaz, etc.).
+- **Modern Dashboard**: High-performance dashboard with Chart.js, featuring stacked area trends, synchronized color coding, and deep-dive breakouts.
+- **📱 Mobile Friendly**: Specifically optimized for the **Pixel 3a** and other small screens.
+- **🌍 Internationalization**: Complete support for **Ukrainian** and **English** (UI and service types).
+- **🔒 Secure & Production Ready**:
+    - Built on **Chainguard** base images for minimal attack surface.
+    - Multi-arch support (**AMD64/ARM64**) for deployment on desktops or edge devices like **Orange Pi 5**.
+    - Fully configurable via environment variables and Kubernetes secrets.
+- **🤖 Automation**:
+    - Daily background scans via APScheduler.
+    - Telegram bot notifications for new receipts.
+    - Automated CI/CD via GitHub Actions pushing to GHCR.
 
-## 🛠️ Setup Instructions
+## 📋 Requirements
+- **Python 3.12+**
+- **uv** (recommended package manager)
+- **Tesseract OCR** (with Ukrainian/English language packs)
+- **Google API / Nylas Credentials**
+- **Docker** (optional for containerized deployment)
 
-### 1. Google Cloud Configuration (One-time)
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project (e.g., "Komunalka Local").
-3. Navigate to **APIs & Services > Library** and enable the **Gmail API**.
-4. Go to **APIs & Services > OAuth consent screen**.
-   - select **External** (since it's for personal use with your own email).
-   - Fill in required fields (App name, support email).
-   - Add your email as a **Test User**.
-5. Go to **APIs & Services > Credentials**.
-   - Click **Create Credentials > OAuth client ID**.
-   - Application type: **Desktop app**.
-   - Download the JSON file and rename it to `credentials.json`.
-   - **Move `credentials.json` to this project folder.**
+## 🛠️ Setup & Development
 
-### 2. Installation
-Ensure you have Python 3.10+ installed.
-
+### 1. Local Installation
+This project uses `uv` for fast dependency management.
 ```bash
 # Install dependencies
-pip install -r requirements.txt
+make install
+
+# Start development server
+make dev
 ```
+*The app is available at [http://localhost:8000](http://localhost:8000)*
 
-*Note for Orange Pi/Raspberry Pi*: If `torch` installation fails, try installing system packages or using a specific pip index for ARM.
-
-### 3. Usage
-Run the dashboard locally:
-
+### 2. Tesseract OCR Setup
+#### macOS:
 ```bash
-streamlit run app.py
+brew install tesseract tesseract-lang
 ```
-Or to expose it on your local network:
+#### Ubuntu/Debian/OrangePi:
 ```bash
-streamlit run app.py --server.address 0.0.0.0
+sudo apt update
+sudo apt install tesseract-ocr tesseract-ocr-ukr tesseract-ocr-eng
 ```
 
-1. The app will open in your browser.
-2. Enter the path to `credentials.json` (default is `./credentials.json`).
-3. Click **Connect & Scan**.
-4. On first run, a browser window will open to authorize access to your Gmail.
+### 3. Makefile Commands
+| Command | Description |
+| :--- | :--- |
+| `make dev` | Run FastAPI with hot-reload |
+| `make test` | Run pytest suite |
+| `make lint` | Run ruff linter |
+| `make format` | Auto-format code with ruff |
+| `make check-format` | Verify code formatting (CI) |
+| `make docker-build` | Build local Docker image |
+| `make docker-multi-build` | Build and push AMD64/ARM64 images |
+| `make k8s-deploy` | Deploy to Kubernetes via Kustomize |
 
-## 🤖 AI Features
-To enable AI categorization:
-1. Toggle "Enable AI Features" in the sidebar.
-2. The app will download a small model (`distilbert-base-uncased`) to better understand receipt context.
+## 🐳 Docker & Kubernetes
 
-## 📂 Data
-- Data is auto-saved to `receipts_database.csv`.
-- You can export reports directly from the dashboard.
+### Docker (Chainguard)
+The project uses high-security Chainguard base images. To build and run:
+```bash
+make docker-build
+make docker-run
+```
+
+### Kubernetes (k3s/Orange Pi 5)
+Manifests are located in `/k8s`. A `PersistentVolumeClaim` is used for the SQLite database and attachments.
+```bash
+# 1. Update k8s/secret.yaml with your tokens
+# 2. Deploy the stack
+make k8s-deploy
+```
+
+## ⚙️ Configuration
+- **Environment**: Copy `.env.example` to `.env` (secrets for Telegram, Nylas, Gmail).
+- **Login**: Configurable via `APP_USERNAME` and `APP_PASSWORD`. Defaults to `admin`.
+- **Database**: `DATABASE_URL` env var allows switching SQLite paths for K8s volumes.
+
+## 📁 Project Structure
+- `app.py`: Core FastAPI application and i18n logic.
+- `utils.py`: OCR and smart extraction logic.
+- `models.py`: Database schema and persistence.
+- `k8s/`: Kubernetes deployment manifests.
+- `.github/workflows/`: CI/CD multi-arch build pipeline.
+- `templates/` & `static/`: Glassmorphism UI and responsive styles.
+
+## 🍊 Orange Pi 5 / ARM64 Notes
+- The image is fully ARM64 compatible via Docker Buildx.
+- Memory limits in `k8s/deployment.yaml` are tuned for edge devices (512Mi-1Gi).
+- Tesseract runs efficiently on the OP5's RK3588 CPU.

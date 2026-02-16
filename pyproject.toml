@@ -1,17 +1,31 @@
 [project]
 name = "komunalka"
 version = "0.1.0"
-description = "Add your description here"
+description = "Automated utility receipt tracking dashboard with OCR and Gmail/Nylas integration"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "beautifulsoup4>=4.12.0",
-    "google-api-python-client>=2.0.0",
-    "google-auth-httplib2>=0.1.0",
-    "google-auth-oauthlib>=1.0.0",
-    "pandas>=2.0.0",
-    "pdfplumber>=0.10.0",
-    "plotly>=5.18.0",
-    "streamlit>=1.30.0",
-    "transformers>=4.30.0",
+    "apscheduler>=3.11.2",
+    "fastapi>=0.128.7",
+    "google-api-python-client>=2.189.0",
+    "google-auth-oauthlib>=1.2.4",
+    "jinja2>=3.1.6",
+    "openpyxl>=3.1.5",
+    "pandas>=2.3.3",
+    "pdfplumber>=0.11.9",
+    "pillow>=12.1.0",
+    "plotly>=6.5.2",
+    "pytesseract>=0.3.13",
+    "python-dotenv>=1.2.1",
+    "python-multipart>=0.0.22",
+    "python-telegram-bot>=22.6",
+    "sqlalchemy>=2.0.46",
+    "streamlit>=1.54.0",
+    "uvicorn>=0.40.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
 ]

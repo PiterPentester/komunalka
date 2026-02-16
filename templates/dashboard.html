@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ T.title }} - {{ T.dashboard }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <nav>
+        <div
+            style="font-size: 1.5rem; font-weight: 800; background: linear-gradient(to right, #818cf8, #c084fc); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">
+            Komunalka</div>
+        <div class="nav-links">
+            <a href="/dashboard" class="active">{{ T.dashboard }}</a>
+            <a href="/settings">{{ T.settings }}</a>
+            <div style="display: flex; gap: 0.5rem; margin-left: 1rem;">
+                <a href="/lang/uk" {% if lang=='uk' %}style="color: white; font-weight: bold;" {% endif %}>UK</a>
+                <a href="/lang/en" {% if lang=='en' %}style="color: white; font-weight: bold;" {% endif %}>EN</a>
+            </div>
+            <a href="/" style="color: var(--danger);">{{ T.logout }}</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <header class="dashboard-header">
+            <h1>{{ T.dashboard }}</h1>
+            <div class="header-actions">
+                <button id="analyzeBtn" class="btn secondary-btn">
+                    <span>Analyze Local</span>
+                </button>
+                <button id="scanBtn" class="btn btn-primary">
+                    <span>{{ T.scan_btn }}</span>
+                </button>
+            </div>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">{{ T.total_spent }}</div>
+                <div class="stat-value" id="totalSpent">0.00 UAH</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">{{ T.receipts }}</div>
+                <div class="stat-value" id="receiptsCount">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">{{ T.addresses }}</div>
+                <div class="stat-value" id="addressCount">0</div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="card">
+                <h2>{{ T.total_spent }}</h2>
+                <canvas id="serviceChart"></canvas>
+            </div>
+            <div class="card">
+                <h2>{{ T.dashboard }}</h2>
+                <canvas id="trendsChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>{{ T.recent_receipts }}</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ T.date }}</th>
+                            <th>{{ T.provider }}</th>
+                            <th>{{ T.type }}</th>
+                            <th>{{ T.amount }} (UAH)</th>
+                            <th>{{ T.address }}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="receiptsTableBody">
+                        <!-- Data will be populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <script id="receipts-data" type="application/json">
+        {{ json_data | safe }}
+    </script>
+    <script>
+        (function () {
+            const serviceConfig = {
+                'electricity': { color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.2)', label: '{{ T.electricity if T.electricity else "Electricity" }}' },
+                'gas': { color: '#34d399', bg: 'rgba(16, 185, 129, 0.2)', label: '{{ T.gas if T.gas else "Gas" }}' },
+                'water': { color: '#60a5fa', bg: 'rgba(59, 130, 246, 0.2)', label: '{{ T.water if T.water else "Water" }}' },
+                'heating': { color: '#f87171', bg: 'rgba(239, 68, 68, 0.2)', label: '{{ T.heating if T.heating else "Heating" }}' },
+                'rent': { color: '#a78bfa', bg: 'rgba(139, 92, 246, 0.2)', label: '{{ T.rent if T.rent else "Rent" }}' },
+                'internet': { color: '#818cf8', bg: 'rgba(99, 102, 241, 0.2)', label: '{{ T.internet if T.internet else "Internet" }}' },
+                'other': { color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.2)', label: '{{ T.other if T.other else "Other" }}' }
+            };
+
+            function showToast(message, type = 'success') {
+                const container = document.getElementById('toast-container');
+                if (!container) return;
+                const toast = document.createElement('div');
+                toast.className = `toast ${type}`;
+                let icon = type === 'success' ? '✓' : '✕';
+                toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+                container.appendChild(toast);
+                setTimeout(() => {
+                    toast.classList.add('fade-out');
+                    setTimeout(() => toast.remove(), 300);
+                }, 4700);
+            }
+
+            try {
+                const dataNode = document.getElementById('receipts-data');
+                if (!dataNode) throw new Error('Data node not found');
+                const rawData = JSON.parse(dataNode.textContent);
+
+                // Populate Stats
+                const total = rawData.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+                document.getElementById('totalSpent').innerText = total.toFixed(2) + ' UAH';
+                document.getElementById('receiptsCount').innerText = rawData.length;
+                const addresses = rawData.map(r => r.address).filter(a => a && a !== 'N/A');
+                document.getElementById('addressCount').innerText = new Set(addresses).size;
+
+                // Populate Table
+                const tbody = document.getElementById('receiptsTableBody');
+                if (tbody) {
+                    rawData.forEach(r => {
+                        const typeKey = r.type && serviceConfig[r.type] ? r.type : 'other';
+                        const row = `<tr>
+                            <td>${r.date || 'N/A'}</td>
+                            <td>${r.provider || 'N/A'}</td>
+                            <td><span class="badge ${typeKey}">${serviceConfig[typeKey].label}</span></td>
+                            <td>${(r.amount || 0).toFixed(2)}</td>
+                            <td>${r.address || 'N/A'}</td>
+                        </tr>`;
+                        tbody.innerHTML += row;
+                    });
+                }
+
+                // Service Chart (Histogram)
+                const serviceTotals = {};
+                rawData.forEach(r => {
+                    const type = r.type || 'other';
+                    serviceTotals[type] = (serviceTotals[type] || 0) + (r.amount || 0);
+                });
+
+                if (document.getElementById('serviceChart')) {
+                    const sortedLabels = Object.keys(serviceTotals).sort();
+                    new Chart(document.getElementById('serviceChart'), {
+                        type: 'bar',
+                        data: {
+                            labels: sortedLabels.map(l => serviceConfig[l] ? serviceConfig[l].label : l),
+                            datasets: [{
+                                label: '{{ T.amount }}',
+                                data: sortedLabels.map(l => serviceTotals[l]),
+                                backgroundColor: sortedLabels.map(l => serviceConfig[l] ? serviceConfig[l].color : serviceConfig['other'].color),
+                                borderRadius: 6
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: { display: false }
+                            },
+                            scales: {
+                                y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } },
+                                x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+                            }
+                        }
+                    });
+                }
+
+                // Trends Chart (Stacked Breakout)
+                if (document.getElementById('trendsChart')) {
+                    const dates = [...new Set(rawData.map(r => r.date).filter(Boolean))].sort();
+                    const datasets = Object.keys(serviceConfig).map(type => {
+                        return {
+                            label: serviceConfig[type].label,
+                            data: dates.map(date => {
+                                return rawData.filter(r => r.date === date && (r.type || 'other') === type)
+                                    .reduce((sum, r) => sum + r.amount, 0);
+                            }),
+                            borderColor: serviceConfig[type].color,
+                            backgroundColor: serviceConfig[type].bg,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 2,
+                            pointHoverRadius: 6
+                        };
+                    });
+
+                    new Chart(document.getElementById('trendsChart'), {
+                        type: 'line',
+                        data: {
+                            labels: dates,
+                            datasets: datasets
+                        },
+                        options: {
+                            responsive: true,
+                            interaction: {
+                                mode: 'index',
+                                intersect: false
+                            },
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: { color: '#94a3b8', boxWidth: 12, padding: 20 }
+                                },
+                                tooltip: {
+                                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                                    titleColor: '#fff',
+                                    bodyColor: '#94a3b8',
+                                    borderColor: 'rgba(255,255,255,0.1)',
+                                    borderWidth: 1,
+                                    padding: 12,
+                                    callbacks: {
+                                        label: function (context) {
+                                            if (context.parsed.y === 0) return null;
+                                            return `${context.dataset.label}: ${context.parsed.y.toFixed(2)} UAH`;
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    stacked: true,
+                                    grid: { color: 'rgba(255,255,255,0.05)' },
+                                    ticks: { color: '#94a3b8' }
+                                },
+                                x: {
+                                    grid: { display: false },
+                                    ticks: { color: '#94a3b8' }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                // Scan & Analyze buttons logic
+                const setupButton = (id, url, successMsg) => {
+                    const btn = document.getElementById(id);
+                    if (!btn) return;
+                    btn.onclick = async () => {
+                        const originalHTML = btn.innerHTML;
+                        btn.innerHTML = '<div class="spinner"></div> ' + originalHTML;
+                        btn.disabled = true;
+                        try {
+                            const res = await fetch(url, { method: 'POST' });
+                            const result = await res.json();
+                            if (res.ok && result.status === 'success') {
+                                showToast(`${successMsg} Added: ${result.added}`, 'success');
+                                setTimeout(() => location.reload(), 1500);
+                            } else {
+                                showToast('Error: ' + (result.message || 'Unknown error'), 'error');
+                            }
+                        } catch (e) {
+                            showToast('Connection error: ' + e, 'error');
+                        } finally {
+                            btn.innerHTML = originalHTML;
+                            btn.disabled = false;
+                        }
+                    };
+                };
+
+                setupButton('analyzeBtn', '/analyze_local', 'Analysis complete!');
+                setupButton('scanBtn', '/scan', 'Scan complete!');
+
+            } catch (err) {
+                console.error('Dashboard Error:', err);
+            }
+        })();
+    </script>
+
+    <style>
+        .badge {
+            padding: 0.25rem 0.65rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+        }
+
+        .electricity {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.2);
+        }
+
+        .gas {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .water {
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+
+        .heating {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .rent {
+            background: rgba(139, 92, 246, 0.15);
+            color: #a78bfa;
+            border: 1px solid rgba(139, 92, 246, 0.2);
+        }
+
+        .internet {
+            background: rgba(99, 102, 241, 0.15);
+            color: #818cf8;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+        }
+
+        .other {
+            background: rgba(148, 163, 184, 0.15);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        .fade-out {
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.3s ease;
+        }
+    </style>
+</body>
+
+</html>

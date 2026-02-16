@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: komunalka
+  labels:
+    app: komunalka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: komunalka
+  template:
+    metadata:
+      labels:
+        app: komunalka
+    spec:
+      containers:
+      - name: komunalka
+        image: ghcr.io/${{ github.repository }}:latest
+
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - secretRef:
+            name: komunalka-secrets
+        volumeMounts:
+        - name: db-storage
+          mountPath: /app/data
+        - name: attachments-storage
+          mountPath: /app/attachments
+        # Override the SQLite path in app.py via env if needed, 
+        # but let's assume we use /app/data/komunalka.db
+        env:
+        - name: DATABASE_URL
+          value: "sqlite:////app/data/komunalka.db"
+      volumes:
+      - name: db-storage
+        persistentVolumeClaim:
+          claimName: komunalka-db-pvc
+      - name: attachments-storage
+        persistentVolumeClaim:
+          claimName: komunalka-attachments-pvc
