@@ -78,12 +78,16 @@ jobs:
         if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && github.event_name != 'pull_request'
         run: |
           cd k8s
-          # Replace image tag. Matches "image: anything" and replaces with full GHCR path + SHA
-          # using 's|image: .*|...|' might be too broad if indented, so we match whitespace
-          sed -i 's|image: .*komunalka.*|image: ghcr.io/piterpentester/komunalka:${{ steps.meta.outputs.tags }}|' deployment.yaml
+          # Get the short SHA for the image tag
+          SHA=${{ github.sha }}
+          SHORT_SHA=${SHA:0:7}
+          
+          # Replace image tag. Matches any "image:" line containing "komunalka"
+          sed -i "s|image: .*komunalka.*|image: ghcr.io/piterpentester/komunalka:sha-$SHORT_SHA|" deployment.yaml
           
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
           git add deployment.yaml
-          git commit -m "Update komunalka image tag to ${{ steps.meta.outputs.tags }} [skip ci]"
+          git commit -m "Update komunalka image tag to sha-$SHORT_SHA [skip ci]"
           git push
+
