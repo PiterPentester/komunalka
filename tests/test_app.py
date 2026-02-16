@@ -10,13 +10,14 @@ def test_login_page(client):
 def test_login_success(client):
     # Clear sessions before test
     sessions.clear()
-    # We need to match the password in .env if it's loaded, 
+    # We need to match the password in .env if it's loaded,
     # but for tests it's better to ensure we know what we are testing.
     # The app.py loads load_dotenv() at the top.
     import os
+
     user = os.environ.get("APP_USERNAME", "admin")
     pwd = os.environ.get("APP_PASSWORD", "admin")
-    
+
     response = client.post(
         "/login",
         data={"username": user, "password": pwd},
