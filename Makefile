@@ -37,15 +37,15 @@ test:
 
 .PHONY: lint
 lint:
-	uv run ruff check .
+	uvx ruff check .
 
 .PHONY: format
 format:
-	uv run ruff format .
+	uvx ruff format .
 
 .PHONY: check-format
 check-format:
-	uv run ruff format --check .
+	uvx ruff format --check .
 
 .PHONY: clean
 clean:
@@ -68,7 +68,7 @@ docker-run:
 # Kubernetes operations
 .PHONY: k8s-deploy
 k8s-deploy:
-	kubectl apply -k k8s/
+	kubectl apply -f k8s/
 
 .PHONY: k8s-status
 k8s-status:

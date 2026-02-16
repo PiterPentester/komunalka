@@ -16,8 +16,7 @@ spec:
     spec:
       containers:
       - name: komunalka
-        image: ghcr.io/${{ github.repository }}:latest
-
+        image: ghcr.io/piterpentester/komunalka:latest
         imagePullPolicy: Always
         resources:
           requests:

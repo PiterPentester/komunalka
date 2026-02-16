@@ -71,7 +71,7 @@ def process_emails(service, keywords=["квитанція", "receipt", "плат
                     # Use unique filename to prevent overwrites
                     unique_filename = f"{msg['id'][:8]}_{part['filename']}"
                     path = os.path.join("attachments", unique_filename)
-                    
+
                     if os.path.exists(path):
                         downloaded_files.append(path)
                         continue

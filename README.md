@@ -9,9 +9,10 @@ A full-stack Python web application to automate utility receipt tracking from Gm
 - **📱 Mobile Friendly**: Specifically optimized for the **Pixel 3a** and other small screens.
 - **🌍 Internationalization**: Complete support for **Ukrainian** and **English** (UI and service types).
 - **🔒 Secure & Production Ready**:
-    - Built on **Chainguard** base images for minimal attack surface.
-    - Multi-arch support (**AMD64/ARM64**) for deployment on desktops or edge devices like **Orange Pi 5**.
+    - Optimized **multi-stage Docker builds** using `python:3.12-slim-bookworm` for efficiency.
+    - Multi-arch support (**AMD64/ARM64**) for deployment on desktops or edge devices like **Orange Pi**.
     - Fully configurable via environment variables and Kubernetes secrets.
+
 - **🤖 Automation**:
     - Daily background scans via APScheduler.
     - Telegram bot notifications for new receipts.
@@ -57,13 +58,14 @@ sudo apt install tesseract-ocr tesseract-ocr-ukr tesseract-ocr-eng
 | `make format` | Auto-format code with ruff |
 | `make check-format` | Verify code formatting (CI) |
 | `make docker-build` | Build local Docker image |
-| `make docker-multi-build` | Build and push AMD64/ARM64 images |
-| `make k8s-deploy` | Deploy to Kubernetes via Kustomize |
+| `make docker-arm64-build` | Build and push ARM64 image |
+| `make k8s-deploy` | Deploy to Kubernetes via kubectl |
+
 
 ## 🐳 Docker & Kubernetes
 
-### Docker (Chainguard)
-The project uses high-security Chainguard base images. To build and run:
+### Docker (Multi-stage)
+The project uses optimized multi-stage builds. To build and run natively:
 ```bash
 make docker-build
 make docker-run

@@ -75,9 +75,11 @@ def process_nylas_emails(
                         # Use unique filename to prevent overwrites (e.g. many files named receipt.pdf)
                         unique_filename = f"{msg.id[:8]}_{att_filename}"
                         path = os.path.join("attachments", unique_filename)
-                        
+
                         if os.path.exists(path):
-                            logging.info(f"Attachment {unique_filename} already exists, skipping download.")
+                            logging.info(
+                                f"Attachment {unique_filename} already exists, skipping download."
+                            )
                             downloaded_files.append(path)
                             continue
 

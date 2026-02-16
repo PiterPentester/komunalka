@@ -75,3 +75,17 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      
+      - name: Update Kubernetes resources
+        if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && github.event_name != 'pull_request'
+        run: |
+          cd k8s
+          # Replace image tag. Matches "image: anything" and replaces with full GHCR path + SHA
+          # using 's|image: .*|...|' might be too broad if indented, so we match whitespace
+          sed -i 's|image: .*komunalka.*|image: ${{ env.REGISTRY }}/${{ steps.owner.outputs.val }}/${{ env.IMAGE_NAME }}:${{ steps.slug.outputs.sha8 }}|' deployment.yaml
+          
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          git add deployment.yaml
+          git commit -m "Update komunalka image tag to ${{ steps.slug.outputs.sha8 }} [skip ci]"
+          git push
