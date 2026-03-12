@@ -1,5 +1,27 @@
+"""
+Unit tests for utils.py.
+
+All tests use the `fake_account_mapping` fixture defined in conftest.py
+(applied via autouse=True), so they are fully isolated from the real
+accounts_to_address_mapping.csv file and will not break if that file changes.
+
+Fake accounts used:
+  T-0001 – Water
+  T-0002 – Gas supply
+  T-0003 – Gas transport
+  T-0004 – Electricity
+  T-0005 – Garbage
+  T-0006 – Heating + Maintenance (same account, multi-entry)
+  T-0007 – Gas vs Water, two different addresses (same account)
+"""
+
 import utils
 from datetime import datetime
+
+
+# ---------------------------------------------------------------------------
+# Pure-function tests (no mapping involved)
+# ---------------------------------------------------------------------------
 
 
 def test_infer_service_type():
@@ -17,129 +39,143 @@ def test_parse_date():
     assert utils.parse_date("invalid") is None
 
 
-def test_extract_data_from_text_by_account():
-    sample_text = """
-    Отримувач: Славутське УВКГ
-    Квитанція № 999
-    Особовий рахунок: 3934
+# ---------------------------------------------------------------------------
+# Receipt extraction tests (all use fake accounts / addresses)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_data_from_text_by_account_water():
+    """Account T-0001 → Water service, resolved from mapping."""
+    text = """
+    Отримувач: Тест-Водоканал
+    Квитанція № TEST-001
+    Особовий рахунок: T-0001
     Сума: 200.00
     """
-    data = utils.extract_data_from_text(sample_text)
-    assert data["account_number"] == "3934"
-    assert data["address"] == "пров. Григорія Сковороди, буд. 20, кв. 2"
+    data = utils.extract_data_from_text(text)
+    assert data["account_number"] == "T-0001"
+    assert data["address"] == "вул. Тестова, буд. 1, кв. 1"
     assert data["service_type"] == "water"
+    assert data["total_amount"] == 200.00
 
 
 def test_extract_data_from_text_by_address():
-    sample_text = """
-    Отримувач: Газмережі
+    """Address lookup — fake address triggers a match even without an account number."""
+    text = """
+    Отримувач: Тест-Газ
     Сума: 300.00
-    Адреса: вул. Грушевського, буд. 82
+    Адреса: вул. Тестова, буд. 1, кв. 1
     """
-    data = utils.extract_data_from_text(sample_text)
-    assert data["address"] == "вул. Грушевського, буд.82"
+    data = utils.extract_data_from_text(text)
+    # Address should be normalized to the canonical value from mapping
+    assert data["address"] == "вул. Тестова, буд. 1, кв. 1"
     assert data["total_amount"] == 300.00
 
 
 def test_extract_data_from_text_skipped():
-    sample_text = """
-    Отримувач: Невідомий
+    """Receipts with unknown accounts and addresses must be discarded."""
+    text = """
+    Отримувач: Абсолютно Невідомий
     Сума: 10.00
-    Адреса: вул. Чужа, 1
+    Адреса: вул. Чужа, 999
     """
-    data = utils.extract_data_from_text(sample_text)
-    assert data == {}  # Should be skipped
-def test_extract_data_from_text_multiple_accounts():
-    # Account 1-5817 has multiple entries: Опалення and Утримання будинку
-    # Test for Опалення (heating)
-    sample_text_heating = """
-    Отримувач: Славутське ЖКО КП
-    Квитанція № 123
-    Особовий рахунок: 1-5817
-    Призначення: Оплата за опалення
-    Сума: 500.00
-    """
-    data = utils.extract_data_from_text(sample_text_heating)
-    assert data["account_number"] == "1-5817"
-    assert data["service_type"] == "heating"
-    assert data["address"] == "вул. Перемоги, буд. 25, кв. 115-116"
+    data = utils.extract_data_from_text(text)
+    assert data == {}
 
-    # Test for Утримання будинку (maintenance)
-    sample_text_rent = """
-    Отримувач: Славутське ЖКО КП
-    Квитанція № 124
-    Особовий рахунок: 1-5817
-    Призначення: Утримання будинку
-    Сума: 200.00
-    """
-    data = utils.extract_data_from_text(sample_text_rent)
-    assert data["account_number"] == "1-5817"
-    assert data["service_type"] == "maintenance"
-    assert data["address"] == "вул. Перемоги, буд. 25, кв. 115-116"
 
-def test_extract_data_from_text_multiple_accounts_diff_address():
-    # Mock ACCOUNT_MAPPING for this test
-    original_mapping = utils.ACCOUNT_MAPPING
-    utils.ACCOUNT_MAPPING = {
-        "99-9999": [
-            {"address": "Address A", "service": "Газопостачання"},
-            {"address": "Address B", "service": "Вода"}
-        ]
-    }
-    try:
-        # Test for Gas
-        sample_gas = "Особовий рахунок: 99-9999\nНазва: Нафтогаз\nСума: 100"
-        data = utils.extract_data_from_text(sample_gas)
-        assert data["address"] == "Address A"
-
-        # Test for Water
-        sample_water = "Особовий рахунок: 99-9999\nНазва: Водоканал\nСума: 200"
-        data = utils.extract_data_from_text(sample_water)
-        assert data["address"] == "Address B"
-    finally:
-        utils.ACCOUNT_MAPPING = original_mapping
-
-def test_extract_data_from_text_garbage():
-    sample_text = """
-    Отримувач: Славута-Сервіс, КП
-    Квитанція № 555
-    Особовий рахунок: 5-5817
-    Призначення: Вивіз ТПВ
-    Сума: 50.00
-    """
-    data = utils.extract_data_from_text(sample_text)
-    assert data["account_number"] == "5-5817"
-    assert data["service_type"] == "garbage"
-def test_extract_data_from_text_gas_split():
-    # Account 360098992 (Supply) and 1400262249 (Transport)
-    # Test for Gas Supply
-    sample_supply = """
-    Отримувач: Хмельницька філія ТОВ ГАЗМЕРЕЖІ
-    Особовий рахунок: 360098992
+def test_extract_data_from_text_gas_supply():
+    """Account T-0002 → Gas supply."""
+    text = """
+    Отримувач: Тест-Газ
+    Квитанція № TEST-002
+    Особовий рахунок: T-0002
     Сума: 150.00
     """
-    data = utils.extract_data_from_text(sample_supply)
+    data = utils.extract_data_from_text(text)
+    assert data["account_number"] == "T-0002"
     assert data["service_type"] == "gas_supply"
-    assert data["address"] == "пров. Григорія Сковороди, буд. 20, кв. 2"
-    
-    # Test for Gas Transport
-    sample_transport = """
-    Отримувач: Газорозподільні мережі України
-    Особовий рахунок: 1400262249
+    assert data["address"] == "вул. Тестова, буд. 1, кв. 1"
+
+
+def test_extract_data_from_text_gas_transport():
+    """Account T-0003 → Gas transport."""
+    text = """
+    Отримувач: Тест-Газмережі
+    Квитанція № TEST-003
+    Особовий рахунок: T-0003
     Сума: 70.00
     """
-    data = utils.extract_data_from_text(sample_transport)
+    data = utils.extract_data_from_text(text)
+    assert data["account_number"] == "T-0003"
     assert data["service_type"] == "gas_transport"
 
 
 def test_extract_data_from_text_electricity():
-    # Test for Electricity (newly added)
-    sample_text = """
-    Отримувач: ТОВ "Хмельницькенергозбут"
-    Особовий рахунок: 11100008010025
+    """Account T-0004 → Electricity."""
+    text = """
+    Отримувач: Тест-Енерго
+    Квитанція № TEST-004
+    Особовий рахунок: T-0004
     Сума: 450.00
     """
-    data = utils.extract_data_from_text(sample_text)
+    data = utils.extract_data_from_text(text)
+    assert data["account_number"] == "T-0004"
     assert data["service_type"] == "electricity"
-    assert data["account_number"] == "11100008010025"
-    assert data["address"] == "пров. Григорія Сковороди, буд. 20, кв. 2"
+    assert data["address"] == "вул. Тестова, буд. 1, кв. 1"
+
+
+def test_extract_data_from_text_garbage():
+    """Account T-0005 → Garbage collection."""
+    text = """
+    Отримувач: Тест-Сервіс
+    Квитанція № TEST-005
+    Особовий рахунок: T-0005
+    Призначення: Вивіз ТПВ
+    Сума: 50.00
+    """
+    data = utils.extract_data_from_text(text)
+    assert data["account_number"] == "T-0005"
+    assert data["service_type"] == "garbage"
+
+
+def test_extract_data_from_text_multi_service_heating():
+    """Account T-0006 with heating billing → picks Heating entry."""
+    text = """
+    Отримувач: Тест-ЖКО
+    Квитанція № TEST-006-H
+    Особовий рахунок: T-0006
+    Призначення: Оплата за опалення
+    Сума: 500.00
+    """
+    data = utils.extract_data_from_text(text)
+    assert data["account_number"] == "T-0006"
+    assert data["service_type"] == "heating"
+    assert data["address"] == "вул. Тестова, буд. 3, кв. 5"
+
+
+def test_extract_data_from_text_multi_service_maintenance():
+    """Account T-0006 with maintenance billing → picks Maintenance entry."""
+    text = """
+    Отримувач: Тест-ЖКО
+    Квитанція № TEST-006-M
+    Особовий рахунок: T-0006
+    Призначення: Утримання будинку
+    Сума: 200.00
+    """
+    data = utils.extract_data_from_text(text)
+    assert data["account_number"] == "T-0006"
+    assert data["service_type"] == "maintenance"
+    assert data["address"] == "вул. Тестова, буд. 3, кв. 5"
+
+
+def test_extract_data_from_text_multi_account_diff_address():
+    """Account T-0007 resolves different addresses based on detected service."""
+    # Gas → first mapping entry
+    text_gas = "Особовий рахунок: T-0007\nНазва: Нафтогаз\nСума: 100"
+    data = utils.extract_data_from_text(text_gas)
+    assert data["address"] == "вул. Адресна, буд. 10"
+
+    # Water → second mapping entry
+    text_water = "Особовий рахунок: T-0007\nНазва: Водоканал\nСума: 200"
+    data = utils.extract_data_from_text(text_water)
+    assert data["address"] == "вул. Інша, буд. 20"
