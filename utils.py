@@ -1,3 +1,4 @@
+import csv
 import re
 import pdfplumber
 import pytesseract
@@ -5,51 +6,58 @@ from PIL import Image
 import os
 from datetime import datetime
 import logging
+import hashlib
+import io
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-import csv
 
 def load_account_mapping(csv_path=None):
     if csv_path is None:
-        csv_path = os.environ.get("ACCOUNTS_MAPPING_PATH", "accounts_to_address_mapping.csv")
-    
+        csv_path = os.environ.get(
+            "ACCOUNTS_MAPPING_PATH", "accounts_to_address_mapping.csv"
+        )
+
     mapping = {}
     content = os.environ.get("ACCOUNTS_MAPPING_CSV")
-    
+
     f = None
     if content:
-        import io
         f = io.StringIO(content.strip())
         logging.info("Loading mapping from environment variable ACCOUNTS_MAPPING_CSV.")
     elif os.path.exists(csv_path):
-        f = open(csv_path, mode='r', encoding='utf-8')
+        f = open(csv_path, mode="r", encoding="utf-8")
         logging.info(f"Loading mapping from file {csv_path}.")
     else:
-        logging.warning(f"Mapping source not found (path: {csv_path}, env: ACCOUNTS_MAPPING_CSV).")
+        logging.warning(
+            f"Mapping source not found (path: {csv_path}, env: ACCOUNTS_MAPPING_CSV)."
+        )
         return mapping
-    
+
     try:
-        reader = csv.DictReader(f, delimiter=';')
+        reader = csv.DictReader(f, delimiter=";")
         for row in reader:
-            acc = row['AccountNumber'].strip()
+            acc = row["AccountNumber"].strip()
             if acc not in mapping:
                 mapping[acc] = []
-            mapping[acc].append({
-                "address": row['Address'].strip(),
-                "service": row['Service'].strip(),
-                "company": row['Company'].strip()
-            })
+            mapping[acc].append(
+                {
+                    "address": row["Address"].strip(),
+                    "service": row["Service"].strip(),
+                    "company": row["Company"].strip(),
+                }
+            )
     except Exception as e:
         logging.error(f"Error loading mapping: {e}")
     finally:
         if not content and f:
             f.close()
-    
+
     return mapping
+
 
 ACCOUNT_MAPPING = load_account_mapping()
 
@@ -85,7 +93,7 @@ def is_receipt_relevant(data, text):
 
     # 3. Fallback: check raw text for any of our known addresses (normalized)
     norm_text = normalize_string(text)
-    
+
     for mappings in ACCOUNT_MAPPING.values():
         for m in mappings:
             addr = m["address"]
@@ -94,7 +102,12 @@ def is_receipt_relevant(data, text):
                     data["address"] = addr
                 return True
             # More relaxed check
-            relaxed_addr = re.sub(r"(?:вул|буд|кв|пров|провулок|просп|бул)\.?", "", addr, flags=re.IGNORECASE)
+            relaxed_addr = re.sub(
+                r"(?:вул|буд|кв|пров|провулок|просп|бул)\.?",
+                "",
+                addr,
+                flags=re.IGNORECASE,
+            )
             if normalize_string(relaxed_addr) in norm_text:
                 if not data.get("address"):
                     data["address"] = addr
@@ -155,6 +168,7 @@ def extract_text_from_pdf(pdf_path):
     except Exception as e:
         logging.error(f"Error reading PDF {pdf_path}: {e}")
     return all_text
+
 
 def extract_text_from_image(image_path):
     try:
@@ -229,18 +243,26 @@ def extract_data_from_text(text):
         for regex in regexes:
             if key == "address":
                 # For address, we allow it to span lines but look for multiple potential hits
-                matches = re.finditer(regex, text, re.IGNORECASE | re.UNICODE | re.DOTALL)
+                matches = re.finditer(
+                    regex, text, re.IGNORECASE | re.UNICODE | re.DOTALL
+                )
                 for match in matches:
                     val = match.group(1).strip()
                     # Clean up internal newlines and extra spaces
-                    val = re.sub(r'\s+', ' ', val)
+                    val = re.sub(r"\s+", " ", val)
                     # Skip PB head office address specifically
                     if "Грушевського" in val and ("1Д" in val.upper() or "Київ" in val):
                         continue
                     # Clean up trailing punctuation
-                    val = val.rstrip(',. ')
+                    val = val.rstrip(",. ")
                     # Skip if it's just the prefix or too short
-                    if len(val) < 8 or val.lower().strip() in ["вул.", "вулиця", "просп.", "бул.", "пров."]:
+                    if len(val) < 8 or val.lower().strip() in [
+                        "вул.",
+                        "вулиця",
+                        "просп.",
+                        "бул.",
+                        "пров.",
+                    ]:
                         continue
                     data[key] = val
                     break
@@ -266,8 +288,6 @@ def extract_data_from_text(text):
                 data[key] = val
                 break
 
-    import hashlib
-
     # Post-process amounts: ensure total_amount is populated
     if "total_amount" not in data and "transferred_amount" in data:
         data["total_amount"] = data["transferred_amount"] + data.get("commission", 0)
@@ -285,25 +305,31 @@ def extract_data_from_text(text):
 
     # Filtering and data enhancement
     if not is_receipt_relevant(data, text):
-        logging.info("Receipt skipped: does not match any valid account number or address.")
+        logging.info(
+            "Receipt skipped: does not match any valid account number or address."
+        )
         return {}
 
     # If we have an account number, enhance with mapping data
     acc_num = data.get("account_number")
     if acc_num and acc_num in ACCOUNT_MAPPING:
         mappings = ACCOUNT_MAPPING[acc_num]
-        
+
         # Pick the best mapping based on service type
         best_mapping = mappings[0]
         service_type = data.get("service_type")
-        
+
         if len(mappings) > 1 and service_type:
             for m in mappings:
                 m_service = m["service"].lower()
-                if service_type == "gas_supply" and ("постач" in m_service or "посулу" in m_service):
+                if service_type == "gas_supply" and (
+                    "постач" in m_service or "посулу" in m_service
+                ):
                     best_mapping = m
                     break
-                elif service_type == "gas_transport" and any(k in m_service for k in ["трансп", "розпод"]):
+                elif service_type == "gas_transport" and any(
+                    k in m_service for k in ["трансп", "розпод"]
+                ):
                     best_mapping = m
                     break
                 elif service_type.startswith("gas") and "газ" in m_service:
@@ -318,16 +344,18 @@ def extract_data_from_text(text):
                 elif service_type == "garbage" and "тпв" in m_service:
                     best_mapping = m
                     break
-                elif service_type == "maintenance" and any(k in m_service for k in ["утрим", "управл", "сервіс"]):
+                elif service_type == "maintenance" and any(
+                    k in m_service for k in ["утрим", "управл", "сервіс"]
+                ):
                     best_mapping = m
                     break
                 elif service_type == "rent" and "оренд" in m_service:
                     best_mapping = m
                     break
-        
+
         # Override address with canonical version
         data["address"] = best_mapping["address"]
-            
+
         # Preference mapping's service info over inferred one if inferred is 'other' or mismatch
         mapping_service = best_mapping["service"].lower()
         if any(k in mapping_service for k in ["електр", "енерг", "svitlo"]):
@@ -348,7 +376,7 @@ def extract_data_from_text(text):
             data["service_type"] = "maintenance"
         elif "оренд" in mapping_service:
             data["service_type"] = "rent"
-            
+
     # If account missing but address known, try to infer account and normalize address
     elif data.get("address"):
         norm_data_addr = normalize_string(data["address"])
@@ -364,7 +392,8 @@ def extract_data_from_text(text):
                         pass
                     found_match = True
                     break
-            if found_match: break
+            if found_match:
+                break
 
     return data
 
@@ -388,31 +417,30 @@ def process_receipt_file(file_path):
         r"Номер квитанції",
         r"Receipt №",
     ]
-    
+
     indices = []
     for marker in markers:
         for m in re.finditer(marker, full_text, re.IGNORECASE):
             indices.append(m.start())
-    
+
     indices = sorted(list(set(indices)))
-    
+
     chunks = []
     if not indices:
         chunks = [full_text]
     else:
         # If text starts with content before any marker, prepend it to first chunk
         if indices[0] > 0:
-            first_marker_pos = indices[0]
             # Check if there's significant content before (e.g. logos, headers)
             # For simplicity, we'll start chunks from 0 if there's only one marker
             if len(indices) == 1:
                 indices[0] = 0
             # Otherwise, first chunk starts from 0 but first receipt marker is at indices[0]
             # Actually, most receipts start with the marker. Let's just use indices.
-        
+
         for i in range(len(indices)):
             start = indices[i]
-            end = indices[i+1] if i+1 < len(indices) else len(full_text)
+            end = indices[i + 1] if i + 1 < len(indices) else len(full_text)
             chunks.append(full_text[start:end])
 
     results = []

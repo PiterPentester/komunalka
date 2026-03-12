@@ -172,7 +172,9 @@ async def dashboard(request: Request, db: DBSession = Depends(get_db)):
                 "provider": r.service_provider,
                 "type": r.service_type,
                 "amount": r.total_amount,
-                "date": r.payment_datetime.strftime("%Y-%m-%d") if r.payment_datetime else None,
+                "date": r.payment_datetime.strftime("%Y-%m-%d")
+                if r.payment_datetime
+                else None,
                 "address": r.address,
                 "account_number": r.account_number,
             }
