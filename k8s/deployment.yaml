@@ -35,11 +35,15 @@ spec:
           mountPath: /app/data
         - name: attachments-storage
           mountPath: /app/attachments
+        - name: mapping-config
+          mountPath: /app/accounts_to_address_mapping.csv
+          subPath: accounts_to_address_mapping.csv
         # Override the SQLite path in app.py via env if needed, 
         # but let's assume we use /app/data/komunalka.db
-        env:
         - name: DATABASE_URL
           value: "sqlite:////app/data/komunalka.db"
+        - name: ACCOUNTS_MAPPING_PATH
+          value: "/app/accounts_to_address_mapping.csv"
       volumes:
       - name: db-storage
         persistentVolumeClaim:
@@ -47,3 +51,9 @@ spec:
       - name: attachments-storage
         persistentVolumeClaim:
           claimName: komunalka-attachments-pvc
+      - name: mapping-config
+        secret:
+          secretName: komunalka-secrets
+          items:
+          - key: ACCOUNTS_MAPPING_CSV
+            path: accounts_to_address_mapping.csv

@@ -14,17 +14,17 @@
             style="font-size: 1.5rem; font-weight: 800; background: linear-gradient(to right, #818cf8, #c084fc); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">
             Komunalka</div>
         <div class="nav-links">
-            <a href="/dashboard">Dashboard</a>
-            <a href="/settings" class="active">Settings</a>
-            <a href="/">Logout</a>
+            <a href="/dashboard">{{ T.dashboard }}</a>
+            <a href="/settings" class="active">{{ T.settings }}</a>
+            <a href="/">{{ T.logout }}</a>
         </div>
     </nav>
 
     <div class="container" style="max-width: 800px;">
-        <h1>Settings</h1>
+        <h1>{{ T.settings }}</h1>
 
         <div class="card">
-            <h2>Notifications</h2>
+            <h2>{{ T.notifications }}</h2>
             <form action="/settings" method="post">
                 <div class="form-group">
                     <label for="token">{{ T.tg_token }}</label>
@@ -49,7 +49,7 @@
                     </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary">Save Settings</button>
+                <button type="submit" class="btn btn-primary">{{ T.save }}</button>
             </form>
         </div>
 

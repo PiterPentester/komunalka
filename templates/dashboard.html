@@ -71,6 +71,7 @@
                     <thead>
                         <tr>
                             <th>{{ T.date }}</th>
+                            <th>{{ T.account_number }}</th>
                             <th>{{ T.provider }}</th>
                             <th>{{ T.type }}</th>
                             <th>{{ T.amount }} (UAH)</th>
@@ -93,13 +94,17 @@
     <script>
         (function () {
             const serviceConfig = {
-                'electricity': { color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.2)', label: '{{ T.electricity if T.electricity else "Electricity" }}' },
-                'gas': { color: '#34d399', bg: 'rgba(16, 185, 129, 0.2)', label: '{{ T.gas if T.gas else "Gas" }}' },
-                'water': { color: '#60a5fa', bg: 'rgba(59, 130, 246, 0.2)', label: '{{ T.water if T.water else "Water" }}' },
-                'heating': { color: '#f87171', bg: 'rgba(239, 68, 68, 0.2)', label: '{{ T.heating if T.heating else "Heating" }}' },
-                'rent': { color: '#a78bfa', bg: 'rgba(139, 92, 246, 0.2)', label: '{{ T.rent if T.rent else "Rent" }}' },
-                'internet': { color: '#818cf8', bg: 'rgba(99, 102, 241, 0.2)', label: '{{ T.internet if T.internet else "Internet" }}' },
-                'other': { color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.2)', label: '{{ T.other if T.other else "Other" }}' }
+                'electricity': { color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.2)', label: '{{ T.electricity }}' },
+                'gas_supply': { color: '#34d399', bg: 'rgba(16, 185, 129, 0.2)', label: '{{ T.gas_supply }}' },
+                'gas': { color: '#34d399', bg: 'rgba(16, 185, 129, 0.2)', label: '{{ T.gas_supply }}' }, // alias
+                'gas_transport': { color: '#2dd4bf', bg: 'rgba(45, 212, 191, 0.2)', label: '{{ T.gas_transport }}' },
+                'water': { color: '#60a5fa', bg: 'rgba(59, 130, 246, 0.2)', label: '{{ T.water }}' },
+                'heating': { color: '#f87171', bg: 'rgba(239, 68, 68, 0.2)', label: '{{ T.heating }}' },
+                'maintenance': { color: '#a78bfa', bg: 'rgba(139, 92, 246, 0.2)', label: '{{ T.maintenance }}' },
+                'rent': { color: '#a78bfa', bg: 'rgba(139, 92, 246, 0.2)', label: '{{ T.maintenance }}' }, // alias
+                'garbage': { color: '#f472b6', bg: 'rgba(244, 114, 182, 0.2)', label: '{{ T.garbage }}' },
+                'internet': { color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.2)', label: '{{ T.internet }}' },
+                'other': { color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.2)', label: '{{ T.other }}' }
             };
 
             function showToast(message, type = 'success') {
@@ -132,13 +137,18 @@
                 const tbody = document.getElementById('receiptsTableBody');
                 if (tbody) {
                     rawData.forEach(r => {
+                        // Normalize legacy types
+                        if (r.type === 'gas') r.type = 'gas_supply';
+                        if (r.type === 'rent') r.type = 'maintenance';
+                        
                         const typeKey = r.type && serviceConfig[r.type] ? r.type : 'other';
                         const row = `<tr>
                             <td>${r.date || 'N/A'}</td>
+                            <td><span style="font-family: monospace; font-size: 0.85rem; color: #94a3b8;">${r.account_number || '—'}</span></td>
                             <td>${r.provider || 'N/A'}</td>
                             <td><span class="badge ${typeKey}">${serviceConfig[typeKey].label}</span></td>
                             <td>${(r.amount || 0).toFixed(2)}</td>
-                            <td>${r.address || 'N/A'}</td>
+                            <td title="${r.address || ''}">${r.address || 'N/A'}</td>
                         </tr>`;
                         tbody.innerHTML += row;
                     });
@@ -180,12 +190,18 @@
                 // Trends Chart (Stacked Breakout)
                 if (document.getElementById('trendsChart')) {
                     const dates = [...new Set(rawData.map(r => r.date).filter(Boolean))].sort();
-                    const datasets = Object.keys(serviceConfig).map(type => {
+                    
+                    // Filter down to only categories that have spending > 0
+                    const activeTypes = Object.keys(serviceConfig).filter(type => {
+                        return rawData.some(r => (r.type || 'other') === type && r.amount > 0);
+                    });
+
+                    const datasets = activeTypes.map(type => {
                         return {
                             label: serviceConfig[type].label,
                             data: dates.map(date => {
                                 return rawData.filter(r => r.date === date && (r.type || 'other') === type)
-                                    .reduce((sum, r) => sum + r.amount, 0);
+                                    .reduce((sum, r) => sum + (r.amount || 0), 0);
                             }),
                             borderColor: serviceConfig[type].color,
                             backgroundColor: serviceConfig[type].bg,
@@ -288,16 +304,40 @@
             letter-spacing: 0.025em;
         }
 
+        .other {
+            background: rgba(148, 163, 184, 0.15);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        .gas_supply {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .gas_transport {
+            background: rgba(45, 212, 191, 0.15);
+            color: #2dd4bf;
+            border: 1px solid rgba(45, 212, 191, 0.2);
+        }
+
+        .maintenance {
+            background: rgba(139, 92, 246, 0.15);
+            color: #a78bfa;
+            border: 1px solid rgba(139, 92, 246, 0.2);
+        }
+
+        .garbage {
+            background: rgba(244, 114, 182, 0.15);
+            color: #f472b6;
+            border: 1px solid rgba(244, 114, 182, 0.2);
+        }
+
         .electricity {
             background: rgba(245, 158, 11, 0.15);
             color: #fbbf24;
             border: 1px solid rgba(245, 158, 11, 0.2);
-        }
-
-        .gas {
-            background: rgba(16, 185, 129, 0.15);
-            color: #34d399;
-            border: 1px solid rgba(16, 185, 129, 0.2);
         }
 
         .water {
@@ -319,15 +359,9 @@
         }
 
         .internet {
-            background: rgba(99, 102, 241, 0.15);
-            color: #818cf8;
-            border: 1px solid rgba(99, 102, 241, 0.2);
-        }
-
-        .other {
-            background: rgba(148, 163, 184, 0.15);
-            color: #94a3b8;
-            border: 1px solid rgba(148, 163, 184, 0.2);
+            background: rgba(56, 189, 248, 0.15);
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.2);
         }
 
         .fade-out {

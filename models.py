@@ -21,6 +21,7 @@ class Receipt(Base):
     payer_name = Column(String)
     address = Column(String)
     bank_terminal = Column(String)
+    account_number = Column(String, nullable=True)
     payment_status = Column(String)
     raw_file_path = Column(String, nullable=True)
     extracted_at = Column(DateTime, default=datetime.utcnow)

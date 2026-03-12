@@ -37,6 +37,7 @@ attachments/
 credentials.json
 token.json
 k8s/secret.yaml
+accounts_to_address_mapping.csv
 
 # IDEs
 .vscode/

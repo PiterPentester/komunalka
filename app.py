@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from models import init_db, get_session, Receipt
 from gmail_helper import get_gmail_service, process_emails
 from nylas_helper import get_nylas_client, process_nylas_emails
-from utils import process_receipt_file
+from utils import process_receipt_file, get_known_addresses
 from scheduler import start_scheduler
 
 load_dotenv()
@@ -58,12 +58,16 @@ I18N = {
         "user": "Користувач",
         "pwd": "Пароль",
         "electricity": "Електроенергія",
-        "gas": "Газ",
+        "gas_supply": "Газопостачання",
+        "gas_transport": "Транспортування газу",
         "water": "Вода",
         "heating": "Опалення",
-        "rent": "Управління",
+        "maintenance": "Утримання будинку",
+        "garbage": "Вивіз ТПВ",
+        "rent": "Оренда",
         "internet": "Інтернет",
         "other": "Інше",
+        "account_number": "Особовий рахунок",
     },
     "en": {
         "title": "Komunalka",
@@ -90,12 +94,16 @@ I18N = {
         "user": "User",
         "pwd": "Password",
         "electricity": "Electricity",
-        "gas": "Gas",
+        "gas_supply": "Gas Supply",
+        "gas_transport": "Gas Transport",
         "water": "Water",
         "heating": "Heating",
+        "maintenance": "Maintenance",
+        "garbage": "Garbage",
         "rent": "Rent",
         "internet": "Internet",
         "other": "Other",
+        "account_number": "Account Number",
     },
 }
 
@@ -164,10 +172,9 @@ async def dashboard(request: Request, db: DBSession = Depends(get_db)):
                 "provider": r.service_provider,
                 "type": r.service_type,
                 "amount": r.total_amount,
-                "date": r.payment_datetime.strftime("%Y-%m-%d")
-                if r.payment_datetime
-                else None,
+                "date": r.payment_datetime.strftime("%Y-%m-%d") if r.payment_datetime else None,
                 "address": r.address,
+                "account_number": r.account_number,
             }
         )
 
@@ -177,6 +184,7 @@ async def dashboard(request: Request, db: DBSession = Depends(get_db)):
             "request": request,
             "receipts": data,
             "json_data": json.dumps(data),
+            "known_addresses": get_known_addresses(),
             "T": I18N[lang],
             "lang": lang,
         },
@@ -211,11 +219,15 @@ async def analyze_local(db: DBSession = Depends(get_db)):
         count = 0
         for f in files:
             logging.info(f"Local analysis of file: {f}")
-            data = process_receipt_file(f)
-            if data:
+            receipts_data = process_receipt_file(f)
+            for data in receipts_data:
                 existing = (
                     db.query(Receipt)
-                    .filter_by(receipt_number=data.get("receipt_number"))
+                    .filter_by(
+                        receipt_number=data.get("receipt_number"),
+                        total_amount=data.get("total_amount"),
+                        service_provider=data.get("service_provider"),
+                    )
                     .first()
                 )
                 if not existing:
@@ -227,7 +239,7 @@ async def analyze_local(db: DBSession = Depends(get_db)):
                     logging.info(
                         f"Receipt {data.get('receipt_number')} already exists."
                     )
-            else:
+            if not receipts_data:
                 logging.warning(f"Could not extract data from {f}")
 
         return JSONResponse({"status": "success", "added": count})
@@ -255,14 +267,18 @@ async def scan_emails(db: DBSession = Depends(get_db)):
         count = 0
         for f in files:
             logging.info(f"Analyzing file: {f}")
-            data = process_receipt_file(f)
-            if data:
+            receipts_data = process_receipt_file(f)
+            for data in receipts_data:
                 logging.info(
-                    f"Successfully extracted data from {f}: {data.get('receipt_number')}"
+                    f"Successfully extracted data: {data.get('receipt_number')}"
                 )
                 existing = (
                     db.query(Receipt)
-                    .filter_by(receipt_number=data.get("receipt_number"))
+                    .filter_by(
+                        receipt_number=data.get("receipt_number"),
+                        total_amount=data.get("total_amount"),
+                        service_provider=data.get("service_provider"),
+                    )
                     .first()
                 )
                 if not existing:
@@ -274,7 +290,7 @@ async def scan_emails(db: DBSession = Depends(get_db)):
                     logging.info(
                         f"Receipt {data.get('receipt_number')} already exists in DB."
                     )
-            else:
+            if not receipts_data:
                 logging.warning(f"Failed to extract data from {f}")
         return JSONResponse({"status": "success", "added": count})
     except Exception as e:
