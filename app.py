@@ -124,7 +124,7 @@ def get_lang(request: Request):
 async def login_page(request: Request):
     lang = get_lang(request)
     return templates.TemplateResponse(
-        "login.html", {"request": request, "T": I18N[lang], "lang": lang}
+        request, "login.html", {"T": I18N[lang], "lang": lang}
     )
 
 
@@ -138,9 +138,9 @@ async def login(request: Request, username: str = Form(...), password: str = For
         sessions["is_authenticated"] = True
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     return templates.TemplateResponse(
+        request,
         "login.html",
         {
-            "request": request,
             "T": I18N[lang],
             "lang": lang,
             "error": "Invalid credentials",
@@ -181,9 +181,9 @@ async def dashboard(request: Request, db: DBSession = Depends(get_db)):
         )
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "receipts": data,
             "json_data": json.dumps(data),
             "known_addresses": get_known_addresses(),
@@ -306,9 +306,9 @@ async def settings(request: Request):
         return RedirectResponse(url="/")
     lang = get_lang(request)
     return templates.TemplateResponse(
+        request,
         "settings.html",
         {
-            "request": request,
             "tg_token": os.environ.get("TG_TOKEN", ""),
             "tg_chat_id": os.environ.get("TG_CHAT_ID", ""),
             "nylas_api_key": os.environ.get("NYLAS_API_KEY", ""),
