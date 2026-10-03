@@ -2,7 +2,7 @@ import os
 from sqlalchemy import Column, Integer, String, Float, DateTime, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
+from datetime import datetime, timezone
 
 Base = declarative_base()
 
@@ -24,7 +24,7 @@ class Receipt(Base):
     account_number = Column(String, nullable=True)
     payment_status = Column(String)
     raw_file_path = Column(String, nullable=True)
-    extracted_at = Column(DateTime, default=datetime.utcnow)
+    extracted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 db_url = os.environ.get("DATABASE_URL", "sqlite:///komunalka.db")
