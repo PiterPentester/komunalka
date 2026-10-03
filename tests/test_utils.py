@@ -179,3 +179,29 @@ def test_extract_data_from_text_multi_account_diff_address():
     text_water = "Особовий рахунок: T-0007\nНазва: Водоканал\nСума: 200"
     data = utils.extract_data_from_text(text_water)
     assert data["address"] == "вул. Інша, буд. 20"
+
+
+def test_extract_data_from_text_privat24_new_layout():
+    """Privat24 new layout where column headers and values are interleaved."""
+    text = """
+    Квитанція електронна
+    9427-5764-4735-6588
+    Платник Одержувач
+    - Тест-Енерго
+    Термінал Код діяльності
+    PBPayments24 4900
+    ID платежу Рахунок одержувача
+    0.0.5048882266.1 UA843157840000026034300880228
+    Платіж Загальна сума
+    Призначення платежу 319,68 грн
+    Сума переказу
+    Пахомова Любов Миколаївна - За електроенергію, о/р
+    T-0004, вул. Тестова, буд. 1, кв. 1 319,68 грн
+    Сума комісії
+    0,00 грн
+    Дата та час операції 15.09.2026 21:14
+    """
+    data = utils.extract_data_from_text(text)
+    assert data["account_number"] == "T-0004"
+    assert data["total_amount"] == 319.68
+
