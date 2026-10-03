@@ -10,10 +10,12 @@ repos:
       name: lint
       entry: make lint
       language: system
+      types: [python]
     - id: test
       name: test
       entry: make test
       language: system
+      types: [python]
     - id: docker-build
       name: docker-build
       entry: make docker-build
