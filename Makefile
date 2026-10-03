@@ -47,6 +47,10 @@ format:
 check-format:
 	uvx ruff format --check .
 
+.PHONY: bandit
+bandit:
+	uvx bandit[toml] -c pyproject.toml .
+
 .PHONY: clean
 clean:
 	rm -rf .pytest_cache .ruff_cache __pycache__ .venv .uv
@@ -60,6 +64,10 @@ docker-build:
 .PHONY: docker-arm64-build
 docker-arm64-build:
 	docker buildx build --platform linux/arm64 -t $(DOCKER_IMAGE) .
+
+.PHONY: docker-scan
+docker-scan:
+	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:latest $(DOCKER_IMAGE)
 
 .PHONY: docker-run
 docker-run:
