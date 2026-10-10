@@ -22,12 +22,15 @@ def daily_scan_task(config):
             files = process_emails(service)
 
         for file_path in files:
-            data = process_receipt_file(file_path)
-            if data:
-                # Check if receipt already exists
+            receipts_data = process_receipt_file(file_path)
+            for data in receipts_data:
                 existing = (
                     session.query(Receipt)
-                    .filter_by(receipt_number=data.get("receipt_number"))
+                    .filter_by(
+                        receipt_number=data.get("receipt_number"),
+                        total_amount=data.get("total_amount"),
+                        service_provider=data.get("service_provider"),
+                    )
                     .first()
                 )
                 if not existing:
@@ -42,6 +45,7 @@ def daily_scan_task(config):
                         payer_name=data.get("payer_name"),
                         address=data.get("address"),
                         bank_terminal=data.get("bank_terminal"),
+                        account_number=data.get("account_number"),
                         payment_status="successful",
                         raw_file_path=file_path,
                     )

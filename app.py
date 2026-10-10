@@ -161,7 +161,11 @@ async def dashboard(request: Request, db: DBSession = Depends(get_db)):
         return RedirectResponse(url="/")
 
     lang = get_lang(request)
-    receipts = db.query(Receipt).order_by(Receipt.payment_datetime.desc()).all()
+    receipts = (
+        db.query(Receipt)
+        .order_by(Receipt.payment_datetime.desc(), Receipt.id.desc())
+        .all()
+    )
 
     # Convert to JSON for Chart.js
     data = []
@@ -233,10 +237,32 @@ async def analyze_local(db: DBSession = Depends(get_db)):
                     .first()
                 )
                 if not existing:
-                    r = Receipt(**data, raw_file_path=f, payment_status="successful")
-                    db.add(r)
-                    db.commit()
-                    count += 1
+                    corrupt = (
+                        db.query(Receipt)
+                        .filter(
+                            Receipt.receipt_number == data.get("receipt_number"),
+                            Receipt.service_provider == data.get("service_provider"),
+                            (
+                                Receipt.total_amount.is_(None)
+                                | Receipt.payment_datetime.is_(None)
+                            ),
+                        )
+                        .first()
+                    )
+                    if corrupt:
+                        for k, v in data.items():
+                            setattr(corrupt, k, v)
+                        corrupt.raw_file_path = f
+                        corrupt.payment_status = "successful"
+                        db.commit()
+                        count += 1
+                    else:
+                        r = Receipt(
+                            **data, raw_file_path=f, payment_status="successful"
+                        )
+                        db.add(r)
+                        db.commit()
+                        count += 1
                 else:
                     logging.info(
                         f"Receipt {data.get('receipt_number')} already exists."
@@ -284,10 +310,32 @@ async def scan_emails(db: DBSession = Depends(get_db)):
                     .first()
                 )
                 if not existing:
-                    r = Receipt(**data, raw_file_path=f, payment_status="successful")
-                    db.add(r)
-                    db.commit()
-                    count += 1
+                    corrupt = (
+                        db.query(Receipt)
+                        .filter(
+                            Receipt.receipt_number == data.get("receipt_number"),
+                            Receipt.service_provider == data.get("service_provider"),
+                            (
+                                Receipt.total_amount.is_(None)
+                                | Receipt.payment_datetime.is_(None)
+                            ),
+                        )
+                        .first()
+                    )
+                    if corrupt:
+                        for k, v in data.items():
+                            setattr(corrupt, k, v)
+                        corrupt.raw_file_path = f
+                        corrupt.payment_status = "successful"
+                        db.commit()
+                        count += 1
+                    else:
+                        r = Receipt(
+                            **data, raw_file_path=f, payment_status="successful"
+                        )
+                        db.add(r)
+                        db.commit()
+                        count += 1
                 else:
                     logging.info(
                         f"Receipt {data.get('receipt_number')} already exists in DB."

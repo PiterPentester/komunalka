@@ -55,3 +55,35 @@ def test_set_language(client):
     response = client.get("/lang/en", follow_redirects=False)
     assert response.status_code == 307
     assert response.cookies["lang"] == "en"
+
+
+def test_dashboard_displays_receipts_ordered(client, db_session):
+    from datetime import datetime
+    from models import Receipt
+
+    sessions["is_authenticated"] = True
+    r1 = Receipt(
+        receipt_number="OLD-001",
+        payment_datetime=datetime(2026, 9, 1, 10, 0),
+        total_amount=100.0,
+        service_provider="Old Provider",
+        service_type="water",
+        payment_status="successful",
+    )
+    r2 = Receipt(
+        receipt_number="NEW-001",
+        payment_datetime=datetime(2026, 10, 10, 10, 31),
+        total_amount=172.06,
+        service_provider="New Provider",
+        service_type="garbage",
+        payment_status="successful",
+    )
+    db_session.add_all([r1, r2])
+    db_session.commit()
+
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "172.06" in response.text
+    assert "New Provider" in response.text
+    assert "Old Provider" in response.text
+

@@ -142,8 +142,23 @@ def infer_service_type(provider_name, text):
 
 
 def parse_date(date_str):
+    if not date_str:
+        return None
+    date_str = date_str.strip().split("\n")[0].strip()
     # Try different formats
-    formats = ["%d.%m.%Y %H:%M", "%d.%m.%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"]
+    formats = [
+        "%d.%m.%Y %H:%M:%S",
+        "%d.%m.%Y %H:%M",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y.%m.%d %H:%M:%S",
+        "%Y.%m.%d %H:%M",
+        "%d.%m.%Y",
+        "%d/%m/%Y",
+        "%Y-%m-%d",
+    ]
     for fmt in formats:
         try:
             return datetime.strptime(date_str, fmt)
@@ -191,30 +206,32 @@ def extract_data_from_text(text):
             r"Квитанція електронна\s+([\d\-]+)",
         ],
         "payment_datetime": [
-            r"Дата та час здійснення операції:\s*([\d\.\s:]+)",
-            r"Дата:\s*([\d\.\s:]+)",
-            r"Date:\s*([\d\.\s:]+)",
-            r"Час:\s*([\d\.\s:]+)",
-            r"Дата та час операції\s*([\d\.\s:]+)",
+            r"Дата та час здійснення операції:?\s*([\d\.\/\s:]+)",
+            r"Дата та час операції:?\s*([\d\.\/\s:]+)",
+            r"Дата:\s*([\d\.\/\s:]+)",
+            r"Date:\s*([\d\.\/\s:]+)",
+            r"Час:\s*([\d\.\/\s:]+)",
         ],
         "total_amount": [
-            r"Загальна сума(?:\s*Призначення платежу)?\s*([\d\.,\s]+)\s*грн",
-            r"Сума до сплати:\s*([\d\.,\s]+)\s*UAH",
+            r"Загальна сума(?:\s*Призначення платежу)?\s*([\d\.,\s]+)\s*(?:грн|UAH)",
+            r"Сума до сплати:\s*([\d\.,\s]+)\s*(?:грн|UAH)",
             r"Разом до сплати:\s*([\d\.,\s]+)",
-            r"Total:\s*([\d\.,\s]+)\s*UAH",
-            r"Сплачено\s*([\d\.,\s]+)\s*грн",
+            r"Total:\s*([\d\.,\s]+)\s*(?:грн|UAH)",
+            r"Сплачено\s*([\d\.,\s]+)\s*(?:грн|UAH)",
+            r"Сума та валюта(?:\s*операції)?[:\s]*([\d\.,\s]+)\s*(?:грн|UAH)",
         ],
         "transferred_amount": [
-            r"Сума:\s*([\d\.,\s]+)\s*UAH",
+            r"Сума:\s*([\d\.,\s]+)\s*(?:грн|UAH)",
             r"Сума:\s*([\d\.,\s]+)",
             r"Amount:\s*([\d\.,\s]+)",
             r"Сума операції:\s*([\d\.,\s]+)",
-            r"Сума переказу\s*([\d\.,\s]+)\s*грн",
+            r"Сума переказу\s*([\d\.,\s]+)\s*(?:грн|UAH)?",
+            r"Сума платежу\s*([\d\.,\s]+)\s*(?:грн|UAH)?",
         ],
         "commission": [
-            r"Комісія:\s*([\d\.,\s]+)\s*UAH",
+            r"Комісія:\s*([\d\.,\s]+)\s*(?:грн|UAH)",
             r"Fee:\s*([\d\.,\s]+)",
-            r"Сума комісії\s*([\d\.,\s]+)\s*грн",
+            r"Сума комісії\s*([\d\.,\s]+)\s*(?:грн|UAH)",
         ],
         "service_provider": [
             r"Отримувач:?\s*([^\n]+)",
@@ -284,13 +301,20 @@ def extract_data_from_text(text):
                     except ValueError:
                         continue
                 elif key == "payment_datetime":
-                    val = parse_date(val)
+                    parsed = parse_date(val)
+                    if not parsed:
+                        continue
+                    val = parsed
                 data[key] = val
                 break
 
     # Post-process amounts: ensure total_amount is populated
     if "total_amount" not in data and "transferred_amount" in data:
         data["total_amount"] = data["transferred_amount"] + data.get("commission", 0)
+    elif "transferred_amount" not in data and "total_amount" in data:
+        data["transferred_amount"] = round(
+            data["total_amount"] - data.get("commission", 0), 2
+        )
 
     # Ensure receipt_number is present (fallback to hash of text if missing)
     if not data.get("receipt_number"):

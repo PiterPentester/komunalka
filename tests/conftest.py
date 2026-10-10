@@ -1,35 +1,49 @@
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from models import Base
 from app import app
 from fastapi.testclient import TestClient
-import os
+
+# Create a single in-memory SQLite engine using StaticPool so all 
+# connections and sessions share the exact same in-memory database.
+engine = create_engine(
+    "sqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_database():
+    """Create all tables once per test session in memory."""
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
 
 
 @pytest.fixture(name="db_session")
 def fixture_db_session():
-    # Use a file-based SQLite for tests to avoid connection sharing issues with :memory:
-    db_file = "test_komunalka.db"
-    engine = create_engine(
-        f"sqlite:///{db_file}", connect_args={"check_same_thread": False}
-    )
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.drop_all(bind=engine)  # Start clean
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
+    """Provide a transactional session that rolls back after each test."""
+    connection = engine.connect()
+    transaction = connection.begin()
+    
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=connection)
+    session = TestingSessionLocal()
+    
     try:
-        yield db
+        yield session
     finally:
-        db.close()
-        # Clean up
-        if os.path.exists(db_file):
-            os.remove(db_file)
+        session.close()
+        transaction.rollback()
+        connection.close()
 
 
 @pytest.fixture(name="client")
 def fixture_client(db_session):
-    # Override get_db dependency to use the test database
+    """Override FastAPI dependency to use the test database session."""
     from app import get_db
 
     def override_get_db():
@@ -46,11 +60,9 @@ def fixture_client(db_session):
 
 # ---------------------------------------------------------------------------
 # Fake account mapping — isolates all tests from the real CSV file.
-# These accounts/addresses do NOT exist in production data.
 # ---------------------------------------------------------------------------
 
 FAKE_ACCOUNT_MAPPING = {
-    # Water
     "T-0001": [
         {
             "address": "вул. Тестова, буд. 1, кв. 1",
@@ -58,7 +70,6 @@ FAKE_ACCOUNT_MAPPING = {
             "company": "Тест-Водоканал",
         },
     ],
-    # Gas supply
     "T-0002": [
         {
             "address": "вул. Тестова, буд. 1, кв. 1",
@@ -66,7 +77,6 @@ FAKE_ACCOUNT_MAPPING = {
             "company": "Тест-Газ",
         },
     ],
-    # Gas transport
     "T-0003": [
         {
             "address": "вул. Тестова, буд. 1, кв. 1",
@@ -74,7 +84,6 @@ FAKE_ACCOUNT_MAPPING = {
             "company": "Тест-Газмережі",
         },
     ],
-    # Electricity
     "T-0004": [
         {
             "address": "вул. Тестова, буд. 1, кв. 1",
@@ -82,7 +91,6 @@ FAKE_ACCOUNT_MAPPING = {
             "company": "Тест-Енерго",
         },
     ],
-    # Garbage
     "T-0005": [
         {
             "address": "вул. Тестова, буд. 2, кв. 3",
@@ -90,7 +98,6 @@ FAKE_ACCOUNT_MAPPING = {
             "company": "Тест-Сервіс",
         },
     ],
-    # Multi-service: heating + maintenance for the same account
     "T-0006": [
         {
             "address": "вул. Тестова, буд. 3, кв. 5",
@@ -103,7 +110,6 @@ FAKE_ACCOUNT_MAPPING = {
             "company": "Тест-ЖКО",
         },
     ],
-    # Multi-service: same account, different addresses (gas vs water)
     "T-0007": [
         {
             "address": "вул. Адресна, буд. 10",
@@ -121,12 +127,6 @@ FAKE_ACCOUNT_MAPPING = {
 
 @pytest.fixture(autouse=True)
 def fake_account_mapping(monkeypatch):
-    """Patch utils.ACCOUNT_MAPPING with fake data for every test.
-
-    This ensures tests are fully isolated from the real CSV file and
-    will not break if the CSV is updated.
-    """
     import utils
-
     monkeypatch.setattr(utils, "ACCOUNT_MAPPING", FAKE_ACCOUNT_MAPPING)
     return FAKE_ACCOUNT_MAPPING

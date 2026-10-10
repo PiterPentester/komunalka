@@ -205,3 +205,38 @@ def test_extract_data_from_text_privat24_new_layout():
     assert data["account_number"] == "T-0004"
     assert data["total_amount"] == 319.68
 
+
+def test_parse_date_slashes():
+    assert utils.parse_date("10/10/2026 10:31") == datetime(2026, 10, 10, 10, 31)
+    assert utils.parse_date("10/10/2026 10:31:45") == datetime(2026, 10, 10, 10, 31, 45)
+
+
+def test_extract_data_from_text_privat24_uah_and_slash_date():
+    text = """
+    вул. Грушевського, 1Д, м. Київ, 01001, Україна
+    Тел.: 3700 E-mail: help@privatbank.ua
+    Квитанція електронна
+    9430-0378-5231-8627
+    Платник Отримувач
+    - Тест-Сервіс
+    Банк-еквайр Код отримувача
+    АТ КБ ПриватБанк 42875827
+    Термінал Код діяльності
+    PBPayments24 4900
+    ID платежу Рахунок отримувача
+    0.0.5078464471.1 UA893052990000026001026002716
+    Платіж Загальна сума
+    172,06 UAH
+    Призначення платежу
+    Сабанюк Іван Андрійович,вивіз ТПВ, о/р T-0005, вул. Тестова, буд. 1, кв. 1
+    Сума комісії
+    1,00 UAH
+    Дата та час операції 10/10/2026 10:31
+    """
+    data = utils.extract_data_from_text(text)
+    assert data["account_number"] == "T-0005"
+    assert data["total_amount"] == 172.06
+    assert data["payment_datetime"] == datetime(2026, 10, 10, 10, 31)
+    assert data["commission"] == 1.00
+
+
