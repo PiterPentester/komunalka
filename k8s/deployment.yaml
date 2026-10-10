@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: komunalka
-        image: ghcr.io/piterpentester/komunalka:sha-91b58ea
+        image: ghcr.io/piterpentester/komunalka:sha-c59dd28
         imagePullPolicy: Always
         resources:
           requests:
